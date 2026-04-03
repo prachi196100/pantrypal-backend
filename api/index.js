@@ -15,11 +15,26 @@ connectDB();
 
 const app = express();
 
-// Middleware
-app.use(cors());
+// ==========================================
+// MIDDLEWARE (CORS + JSON parsing)
+// ==========================================
+const corsOptions = {
+  origin: [
+    'http://localhost:3000',
+    'https://pantrypal-frontend-uyxr-plhbo9wqn-prachi196100s-projects.vercel.app',
+    'https://pantrypal-frontend.vercel.app'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
-// Generate JWT token
+// ==========================================
+// JWT TOKEN GENERATOR
+// ==========================================
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: '30d',
@@ -27,7 +42,7 @@ const generateToken = (id) => {
 };
 
 // ==========================================
-// PUBLIC ROUTES (No authentication needed)
+// PUBLIC ROUTES
 // ==========================================
 
 // Test route
@@ -124,14 +139,12 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Find user by email and include password for comparison
     const user = await User.findOne({ email }).select('+password');
     
     if (!user) {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
-    // Check password
     const isMatch = await user.comparePassword(password);
     
     if (!isMatch) {
@@ -152,7 +165,7 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // ==========================================
-// PROTECTED ROUTES (Authentication required)
+// PROTECTED ROUTES
 // ==========================================
 
 // Get current user profile
@@ -190,11 +203,6 @@ app.put('/api/recipes/:id', protect, async (req, res) => {
       return res.status(404).json({ message: 'Recipe not found' });
     }
 
-    // Optional: Check if user owns the recipe
-    // if (recipe.createdBy && recipe.createdBy.toString() !== req.user._id.toString()) {
-    //   return res.status(401).json({ message: 'Not authorized to update this recipe' });
-    // }
-
     const updatedRecipe = await Recipe.findByIdAndUpdate(
       req.params.id,
       req.body,
@@ -229,16 +237,13 @@ app.post('/api/auth/favorites/:recipeId', protect, async (req, res) => {
     const user = await User.findById(req.user._id);
     const recipeId = req.params.recipeId;
 
-    // Check if already in favorites
     const isFavorite = user.favorites.includes(recipeId);
 
     if (isFavorite) {
-      // Remove from favorites
       user.favorites = user.favorites.filter(id => id.toString() !== recipeId);
       await user.save();
       res.json({ message: 'Removed from favorites', favorites: user.favorites });
     } else {
-      // Add to favorites
       user.favorites.push(recipeId);
       await user.save();
       res.json({ message: 'Added to favorites', favorites: user.favorites });
