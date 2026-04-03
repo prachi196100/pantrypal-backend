@@ -1,14 +1,15 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const path = require('path');
 const jwt = require('jsonwebtoken');
 const connectDB = require('../config/db');
 const Recipe = require('../models/Recipe');
 const User = require('../models/User');
 const { protect } = require('../middleware/auth');
 
-// Load environment variables
-dotenv.config();
+// Load environment variables (ensure backend/.env is used no matter the cwd)
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 // Connect to database
 connectDB();
@@ -18,12 +19,26 @@ const app = express();
 // ==========================================
 // MIDDLEWARE (CORS + JSON parsing)
 // ==========================================
+const allowedOrigins = [
+  'https://pantrypal-frontend-uyxr-plhbo9wqn-prachi196100s-projects.vercel.app',
+  'https://pantrypal-frontend.vercel.app'
+];
+
 const corsOptions = {
-  origin: [
-    'http://localhost:3000',
-    'https://pantrypal-frontend-uyxr-plhbo9wqn-prachi196100s-projects.vercel.app',
-    'https://pantrypal-frontend.vercel.app'
-  ],
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+
+    const isLocalhost =
+      origin.startsWith('http://localhost:') ||
+      origin.startsWith('http://127.0.0.1:');
+    const isVercel = /^https:\/\/.*\.vercel\.app$/.test(origin);
+
+    if (allowedOrigins.includes(origin) || isLocalhost || isVercel) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
@@ -33,13 +48,23 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 // ==========================================
-// JWT TOKEN GENERATOR
+// HELPERS
 // ==========================================
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: '30d',
   });
 };
+
+// Normalize user shape for frontend compatibility
+const formatUser = (user) => ({
+  id: user._id,
+  _id: user._id,
+  username: user.username,
+  name: user.username,
+  email: user.email,
+  favorites: user.favorites
+});
 
 // ==========================================
 // PUBLIC ROUTES
@@ -65,19 +90,6 @@ app.get('/api/recipes', async (req, res) => {
   }
 });
 
-// GET single recipe by ID
-app.get('/api/recipes/:id', async (req, res) => {
-  try {
-    const recipe = await Recipe.findById(req.params.id);
-    if (!recipe) {
-      return res.status(404).json({ message: 'Recipe not found' });
-    }
-    res.json(recipe);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
 // Search recipes
 app.get('/api/recipes/search', async (req, res) => {
   try {
@@ -98,6 +110,19 @@ app.get('/api/recipes/search', async (req, res) => {
   }
 });
 
+// GET single recipe by ID
+app.get('/api/recipes/:id', async (req, res) => {
+  try {
+    const recipe = await Recipe.findById(req.params.id);
+    if (!recipe) {
+      return res.status(404).json({ message: 'Recipe not found' });
+    }
+    res.json(recipe);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // ==========================================
 // AUTH ROUTES (Register/Login)
 // ==========================================
@@ -105,17 +130,22 @@ app.get('/api/recipes/search', async (req, res) => {
 // REGISTER new user
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const { username, name, email, password } = req.body;
+    const resolvedUsername = (username || name || '').trim();
+
+    if (!resolvedUsername || !email || !password) {
+      return res.status(400).json({ message: 'Username, email, and password are required' });
+    }
 
     // Check if user exists
-    const userExists = await User.findOne({ $or: [{ email }, { username }] });
+    const userExists = await User.findOne({ $or: [{ email }, { username: resolvedUsername }] });
     if (userExists) {
       return res.status(400).json({ message: 'User already exists' });
     }
 
     // Create user
     const user = await User.create({
-      username,
+      username: resolvedUsername,
       email,
       password
     });
@@ -126,7 +156,8 @@ app.post('/api/auth/register', async (req, res) => {
         username: user.username,
         email: user.email,
         token: generateToken(user._id),
-        message: 'User registered successfully!'
+        message: 'User registered successfully!',
+        user: formatUser(user)
       });
     }
   } catch (error) {
@@ -137,9 +168,18 @@ app.post('/api/auth/register', async (req, res) => {
 // LOGIN user
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, username, password } = req.body;
 
-    const user = await User.findOne({ email }).select('+password');
+    if ((!email && !username) || !password) {
+      return res.status(400).json({ message: 'Email/username and password are required' });
+    }
+
+    const user = await User.findOne({
+      $or: [
+        email ? { email } : null,
+        username ? { username } : null
+      ].filter(Boolean)
+    }).select('+password');
     
     if (!user) {
       return res.status(401).json({ message: 'Invalid email or password' });
@@ -151,13 +191,17 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
+    user.lastLogin = new Date();
+    await user.save();
+
     res.json({
       _id: user._id,
       username: user.username,
       email: user.email,
       favorites: user.favorites,
       token: generateToken(user._id),
-      message: 'Login successful!'
+      message: 'Login successful!',
+      user: formatUser(user)
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -172,7 +216,10 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/auth/me', protect, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).populate('favorites');
-    res.json(user);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json(formatUser(user));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
