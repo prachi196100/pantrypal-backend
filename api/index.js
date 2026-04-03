@@ -3,7 +3,6 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
 const jwt = require('jsonwebtoken');
-const connectDB = require('../config/db');
 const Recipe = require('../models/Recipe');
 const User = require('../models/User');
 const { protect } = require('../middleware/auth');
@@ -11,8 +10,21 @@ const { protect } = require('../middleware/auth');
 // Load environment variables (ensure backend/.env is used no matter the cwd)
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
+// Database connection for serverless
+let isConnected = false;
+const connectToDatabase = async () => {
+  if (isConnected) return;
+  try {
+    await require('../config/db')();
+    isConnected = true;
+  } catch (error) {
+    console.error('Database connection error:', error);
+    throw error;
+  }
+};
+
 // Connect to database
-connectDB();
+connectToDatabase();
 
 const app = express();
 
