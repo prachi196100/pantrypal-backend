@@ -15,7 +15,7 @@ app.use(cors({
 app.use(express.json());
 
 // MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI || 'your_mongodb_atlas_connection_string')
+mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('Connected to MongoDB Atlas'))
   .catch(err => console.error('MongoDB connection error:', err));
 
@@ -35,7 +35,7 @@ const authMiddleware = (req, res, next) => {
   if (!token) return res.status(401).json({ message: 'Access denied' });
   
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_secret_key');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
     next();
   } catch (err) {
@@ -43,28 +43,45 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
-// Register Route
+// ========== ROUTES ==========
+
+// Root route - FIXES "Cannot GET /"
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'PantryPal API is running 🚀',
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: '/api/health',
+      register: 'POST /api/auth/register',
+      login: 'POST /api/auth/login',
+      getUser: 'GET /api/auth/me'
+    }
+  });
+});
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// Register
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
     
-    // Check if user exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ message: 'User already exists' });
     }
     
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
-    
-    // Create user
     const user = new User({ name, email, password: hashedPassword });
     await user.save();
     
-    // Generate token
     const token = jwt.sign(
       { userId: user._id, email: user.email }, 
-      process.env.JWT_SECRET || 'your_secret_key',
+      process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
     
@@ -78,27 +95,24 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-// Login Route
+// Login
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     
-    // Find user
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
     
-    // Check password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
     
-    // Generate token
     const token = jwt.sign(
       { userId: user._id, email: user.email }, 
-      process.env.JWT_SECRET || 'your_secret_key',
+      process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
     
@@ -122,10 +136,19 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   }
 });
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ message: 'Route not found' });
 });
 
+// ========== SERVER START ==========
+
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+// For local development
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}
+
+// Export for Vercel serverless
+module.exports = app;
