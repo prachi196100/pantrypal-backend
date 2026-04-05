@@ -1,31 +1,33 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 let cachedConnection = null;
 
 const connectDB = async () => {
-  // Return cached connection if available (for serverless)
+  // Reuse connection (important for Vercel / serverless)
   if (cachedConnection) {
     return cachedConnection;
   }
 
   try {
+    // Support both env variable names
     const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
+
     if (!mongoUri) {
-      throw new Error('Missing MongoDB URI. Set MONGODB_URI or MONGO_URI in backend/.env');
+      throw new Error(
+        "Missing MongoDB URI. Set MONGODB_URI or MONGO_URI in .env"
+      );
     }
+
     const conn = await mongoose.connect(mongoUri);
-    console.log(`? MongoDB Connected: ${conn.connection.host}`);
-  } catch (error) {
-    console.error('? MongoDB Connection Error:', error.message);
-    process.exit(1);
-    const conn = await mongoose.connect(process.env.MONGODB_URI);
+
     cachedConnection = conn;
+
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+
     return conn;
   } catch (error) {
-    console.error('❌ MongoDB Connection Error:', error.message);
-    throw error;
-
+    console.error("❌ MongoDB Connection Error:", error.message);
+    throw error; // don't kill server in serverless
   }
 };
 
